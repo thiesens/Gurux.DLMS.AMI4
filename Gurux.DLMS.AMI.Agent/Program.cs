@@ -48,7 +48,7 @@ namespace Gurux.DLMS.AMI.Agent
         static ILogger? _logger;
         static IGXAgentWorker? worker = null;
 
-        static string serverName = Environment.GetEnvironmentVariable("GURUX_SERVER") ?? "https://localhost:8001&quot;;
+        static string serverName = Environment.GetEnvironmentVariable("GURUX_SERVER") ?? "https://localhost:8001";
         static string hostName = Environment.GetEnvironmentVariable("GURUX_HOST") ?? System.Net.Dns.GetHostName();
         static string token = Environment.GetEnvironmentVariable("GURUX_TOKEN");
 
