@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  gurux_dlms_ami_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gurux_ami_agent
+    environment:
+      - GURUX_SERVER=https://ubhome.thiesens.dk:8001
+      - GURUX_HOST=agent1.thiesens.dk
+      - GURUX_TOKEN=49D9F5EDFA8328AA43AC82D78788A0889FBC0F0DCB08C6905CEC851918B2D874
+    networks:
+      - gurux_network
+    restart: unless-stopped
+
+networks:
+  gurux_network:
+    driver: bridge

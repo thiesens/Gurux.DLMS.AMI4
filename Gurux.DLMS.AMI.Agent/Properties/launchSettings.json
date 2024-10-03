@@ -2,6 +2,9 @@
   "profiles": {
     "Gurux.DLMS.AMI.Agent": {
       "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
     }
   }
 }
