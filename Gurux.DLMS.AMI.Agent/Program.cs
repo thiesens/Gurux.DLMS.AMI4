@@ -1,36 +1,4 @@
-﻿//
-// --------------------------------------------------------------------------
-//  Gurux Ltd
-//
-//
-//
-// Filename:        $HeadURL$
-//
-// Version:         $Revision$,
-//                  $Date$
-//                  $Author$
-//
-// Copyright (c) Gurux Ltd
-//
-//---------------------------------------------------------------------------
-//
-//  DESCRIPTION
-//
-// This file is a part of Gurux Device Framework.
-//
-// Gurux Device Framework is Open Source software; you can redistribute it
-// and/or modify it under the terms of the GNU General Public License
-// as published by the Free Software Foundation; version 2 of the License.
-// Gurux Device Framework is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-// See the GNU General Public License for more details.
-//
-// This code is licensed under the GNU General Public License v2.
-// Full text may be retrieved at http://www.gnu.org/licenses/gpl-2.0.txt
-//---------------------------------------------------------------------------
-
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using System.Reflection;
 using System.Diagnostics;
@@ -38,6 +6,7 @@ using System.Runtime.Loader;
 using Gurux.DLMS.AMI.Agent.Worker;
 using Gurux.DLMS.AMI.Agent.Shared;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Gurux.DLMS.AMI.Shared;
 
 namespace Gurux.DLMS.AMI.Agent
@@ -47,35 +16,35 @@ namespace Gurux.DLMS.AMI.Agent
         const string settingsFile = "settings.json";
         static ILogger? _logger;
         static IGXAgentWorker? worker = null;
+                
+        static IConfiguration Configuration;
 
-        static string serverName = Environment.GetEnvironmentVariable("GURUX_SERVER") ?? "https://localhost:8001";
-        static string hostName = Environment.GetEnvironmentVariable("GURUX_HOST") ?? System.Net.Dns.GetHostName();
-        static string token = Environment.GetEnvironmentVariable("GURUX_TOKEN");
-
+        static string serverName;
+        static string hostName;
+        static string token;
 
         /// <summary>
         /// Register the agent.
         /// </summary>
         /// <returns></returns>
         public static async Task RegisterAgent(
-    IServiceCollection services,
-    AutoResetEvent newVersion,
-    IGXAgentWorker worker,
-    AgentOptions options)
+            IServiceCollection services,
+            AutoResetEvent newVersion,
+            IGXAgentWorker worker,
+            AgentOptions options)
         {
             string name = hostName ?? System.Net.Dns.GetHostName();
             if (string.IsNullOrEmpty(token))
             {
                 Console.WriteLine("Running on host. Collecting params");
-                // string name = System.Net.Dns.GetHostName();
-                Console.WriteLine("Welcome to use Gurux.DLMS.AMI.");
-                Console.WriteLine(string.Format("Gurux.DLMS.AMI address: [{0}]", options.Address));
+                Console.WriteLine($"Welcome to use Gurux.DLMS.AMI.");
+                Console.WriteLine($"Gurux.DLMS.AMI address: [{options.Address}]");
                 string? tmp = Console.ReadLine();
                 if (!string.IsNullOrEmpty(tmp))
                 {
                     options.Address = tmp;
                 }
-                Console.WriteLine(string.Format("Enter agent name: [{0}]", name));
+                Console.WriteLine($"Enter agent name: [{name}]");
                 tmp = Console.ReadLine();
                 if (!string.IsNullOrEmpty(tmp))
                 {
@@ -108,14 +77,26 @@ namespace Gurux.DLMS.AMI.Agent
 
         static async Task<int> Main(string[] args)
         {
+            // Load appsettings.json and environment variables.
+            var builder = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                .AddEnvironmentVariables();
+
+            Configuration = builder.Build();
+
+            // Set configuration values, fallback to environment variables if they exist.
+            serverName = Configuration["AgentSettings:ServerName"] ?? Environment.GetEnvironmentVariable("GURUX_SERVER") ?? "https://localhost:8001";
+            hostName = Configuration["AgentSettings:HostName"] ?? Environment.GetEnvironmentVariable("GURUX_HOST") ?? System.Net.Dns.GetHostName();
+            token = Configuration["AgentSettings:Token"] ?? Environment.GetEnvironmentVariable("GURUX_TOKEN");
+
             AssemblyLoadContext alc;
             AutoResetEvent newVersion = new AutoResetEvent(true);
-            //Show file version info.
             Assembly asm = Assembly.GetExecutingAssembly();
             FileVersionInfo info = FileVersionInfo.GetVersionInfo(asm.Location);
-            Console.WriteLine(string.Format("starting Gurux.DLMS.Agent version {0}", string.Join(";", info.FileVersion)));
+            Console.WriteLine($"starting Gurux.DLMS.Agent version {info.FileVersion}");
+
             AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
-            //User cancels the application.
             var cts = new CancellationTokenSource();
             Console.CancelKeyPress += async (s, e) =>
             {
@@ -136,21 +117,23 @@ namespace Gurux.DLMS.AMI.Agent
                 });
                 _logger = loggerFactory.CreateLogger<Program>();
 
-                AgentOptions options = new AgentOptions();
-                //Default docker address.
-                options.Address = "https://localhost:8001";
+                AgentOptions options = new AgentOptions
+                {
+                    Address = serverName // default value from configuration
+                };
+
                 Settings settings = new Settings();
-                ////////////////////////////////////////
-                //Handle command line parameters.
                 int ret = Settings.GetParameters(args, settings);
                 if (ret != 0)
                 {
                     return ret;
                 }
+
                 if (!string.IsNullOrEmpty(settings.Host))
                 {
                     options.Address = settings.Host;
                 }
+
                 if (!File.Exists(settingsFile) || args.Contains("Configure"))
                 {
                     alc = new AssemblyLoadContext("tmp");
@@ -169,15 +152,18 @@ namespace Gurux.DLMS.AMI.Agent
                     await worker.StopAsync();
                     worker = null;
                 }
+
                 options = JsonSerializer.Deserialize<AgentOptions>(File.ReadAllText(settingsFile));
                 if (options == null || options.Token == null || options.Token.Length != 64)
                 {
                     throw new ArgumentException("Invalid token.");
                 }
+
                 if (options.Id == Guid.Empty)
                 {
                     throw new ArgumentException("Invalid agent Id.");
                 }
+
                 if (info.ProductVersion != null && !info.ProductVersion.Contains("-local"))
                 {
                     options.Version = info.ProductVersion;
@@ -189,7 +175,6 @@ namespace Gurux.DLMS.AMI.Agent
 
                 Task t = Task.Run(() => ClosePoller(cts));
                 alc = new AssemblyLoadContext("Agent.Worker", true);
-                //Current agent version is returned if update fails.
                 string currentVersion = options.Version;
                 bool update = newVersion.WaitOne(0);
                 do
@@ -198,14 +183,13 @@ namespace Gurux.DLMS.AMI.Agent
                     {
                         if (worker != null)
                         {
-                            //Save new agent version info.
                             File.WriteAllText(settingsFile, JsonSerializer.Serialize(options));
                             await worker.StopAsync();
                             worker = null;
                             alc.Unload();
                             alc = new AssemblyLoadContext("Agent.Worker", true);
                         }
-                        //Start the new app and exit.
+
                         string? path = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                         if (path != null && !string.IsNullOrEmpty(options.Version))
                         {
@@ -215,6 +199,7 @@ namespace Gurux.DLMS.AMI.Agent
                                 path = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                             }
                         }
+
                         try
                         {
                             asm = alc.LoadFromAssemblyPath(Path.Combine(path, "Gurux.DLMS.AMI.Agent.Worker.dll"));
@@ -232,42 +217,22 @@ namespace Gurux.DLMS.AMI.Agent
                             await worker.StartAsync();
                             currentVersion = options.Version;
                         }
-                        catch (UnauthorizedAccessException)
-                        {
-                            _logger.LogError("Failed to connect to the server. Invalid personal access token.");
-                            break;
-                        }
-                        catch (GXAmiNotFoundException)
-                        {
-                            _logger.LogError("Failed to connect to the server. Unknown agent.");
-                            break;
-                        }
-                        catch (HttpRequestException ex)
-                        {
-                            _logger.LogError("Get next task failed. " + ex.Message);
-                            //Server is closed. Wait 10 seconds before next attempt.
-                            cts.Token.WaitHandle.WaitOne(10000);
-                            newVersion.Set();
-                        }
                         catch (Exception ex)
                         {
-                            _logger.LogError("Get next task failed. " + ex.Message);
-                            //Save previous agent version info.
+                            _logger.LogError($"Error: {ex.Message}");
                             options.Version = currentVersion;
                             File.WriteAllText(settingsFile, JsonSerializer.Serialize(options));
                             newVersion.Set();
                         }
                     }
-                    //Wait until application is closed or a new version is released.
+
                     int wait = AutoResetEvent.WaitAny(new WaitHandle[] { cts.Token.WaitHandle, newVersion });
                     if (wait == 0)
                     {
-                        //App is closed.
                         break;
                     }
                     else if (wait == 1)
                     {
-                        //New version is available.
                         update = true;
                     }
                 }
@@ -285,10 +250,6 @@ namespace Gurux.DLMS.AMI.Agent
             return 0;
         }
 
-        /// <summary>
-        /// Get existed tasks.
-        /// </summary>
-        /// <returns></returns>
         private static void ClosePoller(CancellationTokenSource cts)
         {
             Console.WriteLine("----------------------------------------------------------");
@@ -315,12 +276,4 @@ namespace Gurux.DLMS.AMI.Agent
 
         private static void CurrentDomain_ProcessExit(object sender, EventArgs e)
         {
-            // Start the worker task.
-            if (worker != null)
-            {
-                Task t = Task.Run(() => Disconnect());
-                t.Wait();
-            }
-        }
-    }
-}
+            if (worker
