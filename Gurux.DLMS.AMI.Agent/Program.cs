@@ -48,36 +48,54 @@ namespace Gurux.DLMS.AMI.Agent
         static ILogger? _logger;
         static IGXAgentWorker? worker = null;
 
+        static string serverName = Environment.GetEnvironmentVariable("GURUX_SERVER") ?? "https://localhost:8001&quot;;
+        static string hostName = Environment.GetEnvironmentVariable("GURUX_HOST") ?? System.Net.Dns.GetHostName();
+        static string token = Environment.GetEnvironmentVariable("GURUX_TOKEN");
+
+
         /// <summary>
         /// Register the agent.
         /// </summary>
         /// <returns></returns>
         public static async Task RegisterAgent(
-            IServiceCollection services,
-            AutoResetEvent newVersion,
-            IGXAgentWorker worker,
-            AgentOptions options)
+    IServiceCollection services,
+    AutoResetEvent newVersion,
+    IGXAgentWorker worker,
+    AgentOptions options)
         {
-            string name = System.Net.Dns.GetHostName();
-            Console.WriteLine("Welcome to use Gurux.DLMS.AMI.");
-            Console.WriteLine(string.Format("Gurux.DLMS.AMI address: [{0}]", options.Address));
-            string? tmp = Console.ReadLine();
-            if (!string.IsNullOrEmpty(tmp))
+            string name = hostName ?? System.Net.Dns.GetHostName();
+            if (string.IsNullOrEmpty(token))
             {
-                options.Address = tmp;
+                Console.WriteLine("Running on host. Collecting params");
+                // string name = System.Net.Dns.GetHostName();
+                Console.WriteLine("Welcome to use Gurux.DLMS.AMI.");
+                Console.WriteLine(string.Format("Gurux.DLMS.AMI address: [{0}]", options.Address));
+                string? tmp = Console.ReadLine();
+                if (!string.IsNullOrEmpty(tmp))
+                {
+                    options.Address = tmp;
+                }
+                Console.WriteLine(string.Format("Enter agent name: [{0}]", name));
+                tmp = Console.ReadLine();
+                if (!string.IsNullOrEmpty(tmp))
+                {
+                    name = tmp;
+                }
+                Console.WriteLine("Enter Personal Access Token:");
+                options.Token = Console.ReadLine();
+                if (options.Token == null || options.Token.Length != 64)
+                {
+                    throw new ArgumentException("Invalid token.");
+                }
             }
-            Console.WriteLine(string.Format("Enter agent name: [{0}]", name));
-            tmp = Console.ReadLine();
-            if (!string.IsNullOrEmpty(tmp))
+            else
             {
-                name = tmp;
+                Console.WriteLine("Running in a container.");
+                options.Address = serverName;
+                name = hostName;
+                options.Token = token;
             }
-            Console.WriteLine("Enter Personal Access Token:");
-            options.Token = Console.ReadLine();
-            if (options.Token == null || options.Token.Length != 64)
-            {
-                throw new ArgumentException("Invalid token.");
-            }
+
             worker.Init(services, options, newVersion);
             options.Id = await worker.AddAgentAsync(name);
             if (options.Id == Guid.Empty)
